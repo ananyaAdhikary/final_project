@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BD Bus Track - With Localhost Map Link</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+<style>
+  body {
+    background: #f9f9f9;
+  }
+  #map {
+    height: 500px;
+    width: 100%;
+    border-radius: 0.5rem;
+  }
+  .bus-card {
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+  .bus-card:hover {
+    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
+    transform: translateY(-4px);
+  }
+  .bus-card.selected {
+    border-left: 5px solid #007bff;
+    background-color: #e7f1ff;
+  }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+  <div class="container">
+    <a class="navbar-brand" href="#">
+      <i class="fas fa-bus"></i> BD Bus Track
+    </a>
+  </div>
+</nav>
+
+<div class="container my-4">
+  <div class="row">
+    <!-- Bus List -->
+    <div class="col-md-4 mb-4">
+      <h4><i class="fas fa-list"></i> Active Buses</h4>
+      <input
+        id="searchBus"
+        type="search"
+        class="form-control mb-3"
+        placeholder="Search buses by name or number..."
+      />
+      <div id="busList" class="list-group overflow-auto" style="max-height: 600px;"></div>
+    </div>
+
+    <!-- Map -->
+    <div class="col-md-8">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+          <h5 class="mb-0"><i class="fas fa-map-marker-alt"></i> Live Bus Tracking</h5>
+          <small>Click a bus from the list to track its location or open localhost map</small>
+        </div>
+        <div class="card-body p-0">
+          <div id="map"></div>
+        </div>
+      </div>
+      <div id="busInfo" class="card mt-3" style="display:none;">
+        <div class="card-header">
+          <h6><i class="fas fa-info-circle"></i> Bus Information</h6>
+        </div>
+        <div class="card-body">
+          <p><strong>Bus Name:</strong> <span id="infoBusName"></span></p>
+          <p><strong>Bus Number:</strong> <span id="infoBusNumber"></span></p>
+          <p><strong>Route:</strong> <span id="infoBusRoute"></span></p>
+          <p><strong>Capacity:</strong> <span id="infoBusCapacity"></span></p>
+          <p><strong>Type:</strong> <span id="infoBusType"></span></p>
+          <p><strong>Status:</strong> <span class="badge bg-success">Active</span></p>
+          <p><strong>Start Time:</strong> <span id="infoBusStart"></span></p>
+          <p><strong>End Time:</strong> <span id="infoBusEnd"></span></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FontAwesome -->
+<script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+<!-- Leaflet -->
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+  // Bus data from your table (NULL lat/lng means no static location)
+  const buses = [
+    {
+      id: 1,
+      bus_number: "DH-1234",
+      bus_name: "Green Line Paribahan",
+      route_id: 1,
+      capacity: 40,
+      bus_type: "AC",
+      current_lat: 23.8103,
+      current_lng: 90.4125,
+      status: "active",
+      start_time: "08:00:00",
+      end_time: "13:30:00",
+      special_localhost: true  // <-- This bus uses localhost:3000 link
+    },
+    {
+      id: 2,
+      bus_number: "DH-5678",
+      bus_name: "Shyamoli NR Travels",
+      route_id: 2,
+      capacity: 36,
+      bus_type: "AC",
+      current_lat: 23.8103,
+      current_lng: 90.4125,
+      status: "active",
+      start_time: "09:00:00",
+      end_time: "14:00:00",
+      special_localhost: false
+    },
+    {
+      id: 3,
+      bus_number: "DH-9012",
+      bus_name: "Hanif Enterprise",
+      route_id: 3,
+      capacity: 40,
+      bus_type: "Non-AC",
+      current_lat: 23.8103,
+      current_lng: 90.4125,
+      status: "active",
+      start_time: "07:30:00",
+      end_time: "12:15:00",
+      special_localhost: false
+    },
+    {
+      id: 4,
+      bus_number: "CH-3456",
+      bus_name: "Soudia Transport",
+      route_id: 4,
+      capacity: 32,
+      bus_type: "AC",
+      current_lat: 22.3569,
+      current_lng: 91.7832,
+      status: "active",
+      start_time: "10:00:00",
+      end_time: "13:30:00",
+      special_localhost: false
+    },
+    {
+      id: 7,
+      bus_number: "DHA-2978",
+      bus_name: "Sakura Paribahan",
+      route_id: 2,
+      capacity: 40,
+      bus_type: "AC",
+      current_lat: null,
+      current_lng: null,
+      status: "active",
+      start_time: "10:00:00",
+      end_time: "14:00:00",
+      special_localhost: false
+    }
+  ];
+
+  // Initialize map
+  const map = L.map("map").setView([23.8103, 90.4125], 7);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors"
+  }).addTo(map);
+
+  let currentMarker = null;
+  let selectedBusId = null;
+
+  const busListEl = document.getElementById("busList");
+
+  function renderBusList(list) {
+    busListEl.innerHTML = "";
+    if (list.length === 0) {
+      busListEl.innerHTML = '<div class="text-center text-muted mt-3">No buses found</div>';
+      return;
+    }
+    list.forEach(bus => {
+      const busCard = document.createElement("a");
+      busCard.href = "#";
+      busCard.className = "list-group-item list-group-item-action bus-card";
+      busCard.innerHTML = `
+        <div class="d-flex w-100 justify-content-between align-items-center">
+          <h6 class="mb-1">${bus.bus_name}</h6>
+          <span class="badge bg-info">${bus.bus_type}</span>
+        </div>
+        <p class="mb-1 text-truncate">Route ID: ${bus.route_id}</p>
+        <small class="text-muted">${bus.bus_number}</small>
+      `;
+      busCard.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (bus.special_localhost) {
+          // Open localhost:3000 in new tab for this special bus
+          window.open("http://localhost:3000", "_blank");
+        } else {
+          trackBus(bus.id);
+        }
+        highlightSelected(bus.id);
+      });
+      busListEl.appendChild(busCard);
+    });
+  }
+
+  function highlightSelected(busId) {
+    document.querySelectorAll(".bus-card").forEach(card => {
+      card.classList.remove("selected");
+    });
+    const busCards = Array.from(document.querySelectorAll(".bus-card"));
+    const index = buses.findIndex(b => b.id === busId);
+    if (index !== -1) {
+      busCards[index].classList.add("selected");
+    }
+  }
+
+  function trackBus(busId) {
+    const bus = buses.find(b => b.id === busId);
+    if (!bus) return;
+
+    selectedBusId = busId;
+
+    if (currentMarker) {
+      map.removeLayer(currentMarker);
+      currentMarker = null;
+    }
+
+    if (bus.current_lat !== null && bus.current_lng !== null) {
+      currentMarker = L.marker([bus.current_lat, bus.current_lng])
+        .addTo(map)
+        .bindPopup(`<b>${bus.bus_name}</b><br>${bus.bus_number}`)
+        .openPopup();
+      map.setView([bus.current_lat, bus.current_lng], 12);
+    } else {
+      // No location to show, reset map view
+      map.setView([23.8103, 90.4125], 7);
+      alert("Location not available for this bus.");
+    }
+
+    updateBusInfo(bus);
+  }
+
+  function updateBusInfo(bus) {
+    document.getElementById("infoBusName").textContent = bus.bus_name;
+    document.getElementById("infoBusNumber").textContent = bus.bus_number;
+    document.getElementById("infoBusRoute").textContent = `Route ID: ${bus.route_id}`;
+    document.getElementById("infoBusCapacity").textContent = bus.capacity;
+    document.getElementById("infoBusType").textContent = bus.bus_type;
+    document.getElementById("infoBusStart").textContent = bus.start_time;
+    document.getElementById("infoBusEnd").textContent = bus.end_time;
+    document.getElementById("busInfo").style.display = "block";
+  }
+
+  // Search functionality
+  document.getElementById("searchBus").addEventListener("input", (e) => {
+    const term = e.target.value.toLowerCase();
+    const filtered = buses.filter(bus =>
+      bus.bus_name.toLowerCase().includes(term) ||
+      bus.bus_number.toLowerCase().includes(term) ||
+      String(bus.route_id).includes(term)
+    );
+    renderBusList(filtered);
+    if (filtered.length > 0) {
+      highlightSelected(filtered[0].id);
+      // Only track buses with static location (skip localhost bus on search auto)
+      if (!filtered[0].special_localhost) {
+        trackBus(filtered[0].id);
+      } else {
+        // Clear map marker if localhost bus is first result
+        if (currentMarker) {
+          map.removeLayer(currentMarker);
+          currentMarker = null;
+        }
+        document.getElementById("busInfo").style.display = "none";
+      }
+    } else {
+      if (currentMarker) {
+        map.removeLayer(currentMarker);
+        currentMarker = null;
+      }
+      document.getElementById("busInfo").style.display = "none";
+    }
+  });
+
+  // Initial render
+  renderBusList(buses);
+
+  // Initially track first non-localhost bus automatically
+  const firstBusWithLocation = buses.find(b => !b.special_localhost && b.current_lat !== null && b.current_lng !== null);
+  if (firstBusWithLocation) {
+    highlightSelected(firstBusWithLocation.id);
+    trackBus(firstBusWithLocation.id);
+  }
+</script>
+
+</body>
+</html>
